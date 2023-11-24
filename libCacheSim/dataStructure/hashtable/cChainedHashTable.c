@@ -98,7 +98,7 @@ static inline cache_obj_t *add_to_bucket_locked(hashtable_t *hashtable, uint64_t
 
 /**
  *  This function deletes an object in the hashtable bucket.
- *  @method delete_in_bucket_locked
+ *  @method delete_obj_id_in_bucket_locked
  *  @author Chaos
  *  @date   2023-11-23
  *  @param  hashtable            [Handle of the hashtable.]
@@ -106,7 +106,36 @@ static inline cache_obj_t *add_to_bucket_locked(hashtable_t *hashtable, uint64_t
  *  @param  cache_obj            [The pointer to the object to delete.]
  *  @return                      [Success or not.]
  */
-static inline bool delete_in_bucket_locked(hashtable_t *hashtable, uint64_t bucket_id, obj_id_t obj_id) {
+static inline bool delete_in_bucket_locked(hashtable_t *hashtable, uint64_t bucket_id, cache_obj_t *cache_obj) {
+  cache_obj_t *curr_obj = hashtable->ptr_table[bucket_id];
+  // If the object to delete is NULL, return false.
+  if(curr_obj == NULL || cache_obj == NULL){
+    return false;
+  }
+  // If the object to delete is the head of the bucket, delete it and return true.
+  if (curr_obj == cache_obj) {
+    hashtable->ptr_table[bucket_id] = cache_obj->hash_next;
+    if (!hashtable->external_obj) free_cache_obj(cache_obj);
+    __sync_fetch_and_sub(&hashtable->n_obj, 1);
+    return true;
+  }
+  // If the object to delete is not the head of the bucket, find it.
+  while (curr_obj != NULL && curr_obj->hash_next != cache_obj) {
+    curr_obj = curr_obj->hash_next;
+  }
+  // If the object to delete is in the bucket, delete it and return true.
+  if (curr_obj != NULL) {
+    curr_obj->hash_next = cache_obj->hash_next;
+    if (!hashtable->external_obj) free_cache_obj(cache_obj);
+    __sync_fetch_and_sub(&hashtable->n_obj, 1);
+    return true;
+  }
+  // If the object to delete is not in the bucket, return false.
+  return false;
+}
+
+
+static inline bool delete_obj_id_in_bucket_locked(hashtable_t *hashtable, uint64_t bucket_id, obj_id_t obj_id) {
   cache_obj_t *curr_obj = hashtable->ptr_table[bucket_id];
   cache_obj_t *prev_obj = curr_obj;
 
@@ -128,7 +157,7 @@ static inline bool delete_in_bucket_locked(hashtable_t *hashtable, uint64_t buck
   if (curr_obj != NULL) {
     prev_obj->hash_next = curr_obj->hash_next;
     if (!hashtable->external_obj) free_cache_obj(curr_obj);
-    hashtable->n_obj -= 1;
+    __sync_fetch_and_sub(&hashtable->n_obj, 1);
     return true;
   }
   // the object to remove is not in the bucket (also not in the hashtable)
@@ -220,15 +249,23 @@ cache_obj_t *concurrent_chained_hashtable_insert(hashtable_t *hashtable,
 }
 
 
-/* you need to free the extra_metadata before deleting from hash table */
-bool concurrent_chained_hashtable_delete_obj_id(hashtable_t *hashtable,
+/**
+ *  This function deletes an object in the hashtable. 
+ *  If the object is in the hashtable:
+ *    - decrease the number of objects in the hashtable
+ *    - return true. 
+ *  Else:
+ *    - return false.
+ *  @Author Chaos
+ *  @Date   2023-11-22
+ */bool concurrent_chained_hashtable_delete_obj_id(hashtable_t *hashtable,
                                         const obj_id_t obj_id) {
   uint64_t hv = get_hash_value_int_64(&obj_id) & hashmask(hashtable->hashpower);
   /** Add write lock for removal */
   pthread_rwlock_t* rwlock_ = getRWLock(hashtable->rwlocks_, hv);
   pthread_rwlock_wrlock(rwlock_);
 
-  bool res = delete_in_bucket_locked(hashtable, hv, obj_id);
+  bool res = delete_obj_id_in_bucket_locked(hashtable, hv, obj_id);
 
   pthread_rwlock_unlock(rwlock_);
   return res;
@@ -237,7 +274,12 @@ bool concurrent_chained_hashtable_delete_obj_id(hashtable_t *hashtable,
 bool concurrent_chained_hashtable_try_delete(hashtable_t *hashtable,
                                      cache_obj_t *cache_obj) {
   uint64_t hv = get_hash_value_int_64(&cache_obj->obj_id) & hashmask(hashtable->hashpower);
-  return concurrent_chained_hashtable_delete_obj_id(hashtable, cache_obj->obj_id);
+  /** Add write lock for removal */
+  pthread_rwlock_t* rwlock_ = getRWLock(hashtable->rwlocks_, hv);
+  pthread_rwlock_wrlock(rwlock_);
+  bool res = delete_in_bucket_locked(hashtable, hv, cache_obj);
+  pthread_rwlock_unlock(rwlock_);
+  return res;
 }
 
 void concurrent_chained_hashtable_delete(hashtable_t *hashtable,

@@ -23,7 +23,7 @@ extern "C" {
 #include "../hashtable/cChainedHashTable.h"
 
 /** Power of number of cache objects to insert. */
-size_t g_power = 18; 
+size_t g_power = 19; 
 
 /** Number of cache objects to insert. */
 size_t g_numkeys; // 2^18=262144
@@ -32,7 +32,7 @@ size_t g_numkeys; // 2^18=262144
 size_t g_thread_num = 1;
 
 /** Number of seconds to run read test. */
-size_t g_test_len = 10; // 10s
+size_t g_test_len = 20; // 10s
 
 /** Type of test. */
 size_t g_test_type = 0; // 0: Three tests: Insert, Read, and Delete. Each test is non-overlapping.
@@ -63,8 +63,8 @@ struct handle_hashtable_t{
   func_hashtable_find_obj_id_t func_find_obj;
   func_hashtable_insert_obj_t func_insert_obj;
   func_hashtable_delete_obj_id_t func_delete_obj;
-  func_create_hashtable_t func_create;
-  func_free_hashtable_t func_free;
+  func_create_hashtable_t func_create_hashtable;
+  func_free_hashtable_t func_free_hashtable;
 } ht_handle;
 
 /**
@@ -128,7 +128,7 @@ void *func_read(void* arg){
       gettimeofday(&end, NULL);
       double timeuse = (end.tv_sec - start.tv_sec) +
                        (end.tv_usec - start.tv_usec) / 1000000.0;
-      INFO("Thread %d read %zu objects in %.1f seconds, throughput is %.2f MQPS. %zu success, %zu fail\n", \
+      INFO("Thread %d read %zu objects in %.1f seconds, throughput is %.2f MOPS. %zu success, %zu fail\n", \
         thread_id, reads, timeuse, reads / timeuse / 1000000, success_reads, fail_reads);
       
       return NULL;
@@ -176,7 +176,7 @@ void *func_insert(void* arg){
   gettimeofday(&end, NULL);
   double timeuse = (end.tv_sec - start.tv_sec) +
                    (end.tv_usec - start.tv_usec) / 1000000.0;
-  INFO("Thread %d inserted %zu objects in %.1f seconds, throughput is %.2f MQPS\n", \
+  INFO("Thread %d inserted %zu objects in %.1f seconds, throughput is %.2f MOPS\n", \
     thread_id, inserts, timeuse, inserts / timeuse / 1000000);
 }
 
@@ -219,7 +219,7 @@ void *func_remove(void* arg){
   gettimeofday(&end, NULL);
   double timeuse = (end.tv_sec - start.tv_sec) +
                    (end.tv_usec - start.tv_usec) / 1000000.0;
-  INFO("Thread %d removed %zu objects in %.1f seconds, throughput is %.2f MQPS. %zu success, %zu fail\n", \
+  INFO("Thread %d removed %zu objects in %.1f seconds, throughput is %.2f MOPS. %zu success, %zu fail\n", \
     thread_id, removals, timeuse, removals / timeuse / 1000000, success_removal, fail_removal);
 }
 
@@ -358,16 +358,16 @@ void stress_test() {
     ht_handle.func_find_obj = concurrent_chained_hashtable_find_obj_id;
     ht_handle.func_insert_obj = concurrent_chained_hashtable_insert_obj;
     ht_handle.func_delete_obj = concurrent_chained_hashtable_delete_obj_id;
-    ht_handle.func_create = create_concurrent_chained_hashtable;
-    ht_handle.func_free = free_concurrent_chained_hashtable;
+    ht_handle.func_create_hashtable = create_concurrent_chained_hashtable;
+    ht_handle.func_free_hashtable = free_concurrent_chained_hashtable;
   }   
   // If hashtable type is chainedHashTableV2.
   else if(g_ht_type == 1){
     ht_handle.func_find_obj = chained_hashtable_find_obj_id_v2;
     ht_handle.func_insert_obj = chained_hashtable_insert_obj_v2;
     ht_handle.func_delete_obj = chained_hashtable_delete_obj_id_v2;
-    ht_handle.func_create = create_chained_hashtable_v2;
-    ht_handle.func_free = free_chained_hashtable_v2;
+    ht_handle.func_create_hashtable = create_chained_hashtable_v2;
+    ht_handle.func_free_hashtable = free_chained_hashtable_v2;
   }
 
   // If hashtable type is invalid.
@@ -376,7 +376,7 @@ void stress_test() {
   }
 
   // Creates a hashtable
-  hashtable_t *table = ht_handle.func_create(g_power);
+  hashtable_t *table = ht_handle.func_create_hashtable(g_power);
 
   // If the user select the first test.
   if(g_test_type == 0){
@@ -472,7 +472,7 @@ void stress_test() {
         ERROR("ERROR; return code from pthread_create() is %d\n", rc);
       }
     }
-    printf("----------Throughput MQPS----------\n");
+    printf("----------Throughput MOPS----------\n");
     printf("Seconds\tInsert\tRead\tDelete\tTotal\n");
 
     // Prints the throughput every second
@@ -501,13 +501,13 @@ void stress_test() {
     ERROR("Invalid test type: %lu. It should be 0 or 1.\n", g_test_type);
   }
   // Frees the hashtable
-  ht_handle.func_free(table);
+  ht_handle.func_free_hashtable(table);
 
   printf("----------Results----------\n");
   printf("Number of inserts:\t%lu\n", num_inserts);
   printf("Number of reads:\t%lu\n", num_reads);
   printf("Number of removals:\t%lu\n", num_removals);
-  printf("Total throughput:\t%.2lf MQPS\n", (num_inserts + num_reads + num_removals)/g_test_len/1000000.0);
+  printf("Total throughput:\t%.2lf MOPS\n", (num_inserts + num_reads + num_removals)/g_test_len/1000000.0);
 }
 
 
