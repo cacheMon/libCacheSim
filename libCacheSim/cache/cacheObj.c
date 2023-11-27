@@ -12,7 +12,7 @@
  *  @method verify_cache_obj_fingerprint
  *  @author Chaos
  *  @date   2023-11-22
- *  @param  cache_obj                    [handle of cache item]
+ *  @param  cache_obj                    [pointer of cache item]
  *  @return                              [is valid or not]
  */
 bool verify_cache_obj_fingerprint(const cache_obj_t *cache_obj) {
@@ -24,7 +24,7 @@ bool verify_cache_obj_fingerprint(const cache_obj_t *cache_obj) {
  *  @method set_cache_obj_fingerprint
  *  @author Chaos
  *  @date   2023-11-22
- *  @param  cache_obj                 [handle of cache item]
+ *  @param  cache_obj                 [pointer of cache item]
  */
 void set_cache_obj_fingerprint(cache_obj_t *cache_obj) {
   cache_obj->fingerprint = cache_obj->obj_id;
