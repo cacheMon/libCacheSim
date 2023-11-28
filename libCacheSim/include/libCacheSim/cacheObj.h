@@ -139,6 +139,7 @@ struct cache_obj;
 typedef struct cache_obj {
   struct cache_obj *hash_next;
   obj_id_t obj_id;
+  uint64_t fingerprint;
   uint32_t obj_size;
   struct {
     struct cache_obj *prev;
@@ -183,6 +184,14 @@ typedef struct cache_obj {
 } __attribute__((packed)) cache_obj_t;
 
 struct request;
+
+/**
+ * verify the fingerprint of current cache_obj
+ * @param cache_obj
+ * @param bool [true if the fingerprint is correct]
+ */
+bool verify_cache_obj_fingerprint(const cache_obj_t *cache_obj);
+
 /**
  * copy the cache_obj to req_dest
  * @param req_dest
@@ -205,6 +214,13 @@ void copy_request_to_cache_obj(cache_obj_t *cache_obj,
  * @return
  */
 cache_obj_t *create_cache_obj_from_request(const struct request *req);
+
+/**
+ * create a empty cache_obj from obj_id
+ * @param obj_id
+ * @return
+ */
+cache_obj_t *create_cache_obj_from_obj_id(const obj_id_t obj_id);
 
 /**
  * the cache_obj has built-in a doubly list, in the case the list is used as

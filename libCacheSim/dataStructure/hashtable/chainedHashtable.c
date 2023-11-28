@@ -196,13 +196,13 @@ cache_obj_t *chained_hashtable_insert(hashtable_t *hashtable, request_t *req) {
     cache_obj->hash_next = new_cache_obj;
     cache_obj = new_cache_obj;
   }
-  hashtable->n_obj += 1;
+  __sync_fetch_and_add(&hashtable->n_obj, 1);
   return cache_obj;
 }
 
 /* you need to free the extra_metadata before deleting from hash table */
 void chained_hashtable_delete(hashtable_t *hashtable, cache_obj_t *cache_obj) {
-  hashtable->n_obj -= 1;
+  __sync_fetch_and_sub(&hashtable->n_obj, 1);
   uint64_t hv = get_hash_value_int_64(&cache_obj->obj_id) &
                 hashmask(hashtable->hashpower);
   cache_obj_t *cache_obj_in_bucket = &hashtable->table[hv];

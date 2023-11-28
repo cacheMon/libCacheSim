@@ -8,6 +8,30 @@
 #include "../include/libCacheSim/request.h"
 
 /**
+ *  [verify the fingerprint of cache_obj]
+ *  @method verify_cache_obj_fingerprint
+ *  @author Chaos
+ *  @date   2023-11-22
+ *  @param  cache_obj                    [pointer of cache item]
+ *  @return                              [is valid or not]
+ */
+bool verify_cache_obj_fingerprint(const cache_obj_t *cache_obj) {
+  return cache_obj->obj_id == cache_obj->fingerprint;
+}
+
+/**
+ *  [set the fingerprint of cache_obj]
+ *  @method set_cache_obj_fingerprint
+ *  @author Chaos
+ *  @date   2023-11-22
+ *  @param  cache_obj                 [pointer of cache item]
+ */
+void set_cache_obj_fingerprint(cache_obj_t *cache_obj) {
+  cache_obj->fingerprint = cache_obj->obj_id;
+}
+
+
+/**
  * copy the cache_obj to req_dest
  * @param req_dest
  * @param cache_obj
@@ -17,7 +41,7 @@ void copy_cache_obj_to_request(request_t *req_dest,
   req_dest->obj_id = cache_obj->obj_id;
   req_dest->obj_size = cache_obj->obj_size;
   req_dest->next_access_vtime = cache_obj->misc.next_access_vtime;
-  req_dest->valid = true;
+  req_dest->valid = verify_cache_obj_fingerprint(cache_obj);
 }
 
 /**
@@ -34,6 +58,7 @@ void copy_request_to_cache_obj(cache_obj_t *cache_obj, const request_t *req) {
     cache_obj->exp_time = 0;
 #endif
   cache_obj->obj_id = req->obj_id;
+  set_cache_obj_fingerprint(cache_obj);
 }
 
 /**
@@ -45,6 +70,26 @@ cache_obj_t *create_cache_obj_from_request(const request_t *req) {
   cache_obj_t *cache_obj = my_malloc(cache_obj_t);
   memset(cache_obj, 0, sizeof(cache_obj_t));
   if (req != NULL) copy_request_to_cache_obj(cache_obj, req);
+  return cache_obj;
+}
+
+/**
+ *  [create a cache_obj from obj_id]
+ *  @method create_cache_obj_from_obj_id
+ *  @author Chaos
+ *  @date   2023-11-22
+ *  @param  obj_id                       [Given obj_id]
+ *  @return                              [cache_obj]
+ */
+cache_obj_t *create_cache_obj_from_obj_id(const obj_id_t obj_id) {
+  cache_obj_t *cache_obj = my_malloc(cache_obj_t);
+  memset(cache_obj, 0, sizeof(cache_obj_t));
+  cache_obj->obj_id = obj_id;
+  cache_obj->obj_size = 0;
+#ifdef SUPPORT_TTL
+  cache_obj->exp_time = 0;
+#endif
+  set_cache_obj_fingerprint(cache_obj);
   return cache_obj;
 }
 
