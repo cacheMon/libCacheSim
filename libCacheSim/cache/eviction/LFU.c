@@ -37,6 +37,7 @@ typedef struct LFU_params {
   GHashTable *freq_map;
   uint64_t min_freq;
   uint64_t max_freq;
+  pthread_mutex_t mutex_;
 } LFU_params_t;
 
 // ***********************************************************************
@@ -108,7 +109,7 @@ cache_t *LFU_init(const common_cache_params_t ccache_params,
   params->min_freq = 1;
   params->max_freq = 1;
   params->freq_one_node = freq_node;
-
+  pthread_mutex_init(&params->mutex_, NULL);
   return cache;
 }
 
@@ -166,9 +167,11 @@ static bool LFU_get(cache_t *cache, const request_t *req) {
 static cache_obj_t *LFU_find(cache_t *cache, const request_t *req,
                              const bool update_cache) {
   LFU_params_t *params = (LFU_params_t *)(cache->eviction_params);
-  cache_obj_t *cache_obj = cache_find_base(cache, req, update_cache);
 
-  if (cache_obj && likely(update_cache)) {
+  cache_obj_t *cache_obj = cache_find_base(cache, req, update_cache);
+  pthread_mutex_lock(&params->mutex_);
+
+  if (cache_obj && likely(update_cache) && cache_obj_in_cache(cache_obj)) {
     /* freq incr and move to next freq node */
     cache_obj->lfu.freq += 1;
     if (params->max_freq < cache_obj->lfu.freq) {
@@ -177,6 +180,7 @@ static cache_obj_t *LFU_find(cache_t *cache, const request_t *req,
 
     // find the freq_node this object belongs to and update its info
     gpointer old_key = GSIZE_TO_POINTER(cache_obj->lfu.freq - 1);
+
     freq_node_t *old_node = g_hash_table_lookup(params->freq_map, old_key);
     DEBUG_ASSERT(old_node != NULL);
     DEBUG_ASSERT(old_node->freq == cache_obj->lfu.freq - 1);
@@ -215,6 +219,7 @@ static cache_obj_t *LFU_find(cache_t *cache, const request_t *req,
       }
     }
   }
+  pthread_mutex_unlock(&params->mutex_);
   return cache_obj;
 }
 
@@ -230,15 +235,20 @@ static cache_obj_t *LFU_find(cache_t *cache, const request_t *req,
  */
 static cache_obj_t *LFU_insert(cache_t *cache, const request_t *req) {
   LFU_params_t *params = (LFU_params_t *)(cache->eviction_params);
+
+  cache_obj_t *cache_obj = cache_insert_base(cache, req);
+  pthread_mutex_lock(&params->mutex_);
+
   params->min_freq = 1;
   freq_node_t *freq_one_node = params->freq_one_node;
 
-  cache_obj_t *cache_obj = cache_insert_base(cache, req);
   cache_obj->lfu.freq = 1;
   freq_one_node->n_obj += 1;
 
   append_obj_to_tail(&freq_one_node->first_obj, &freq_one_node->last_obj,
                      cache_obj);
+  cache_obj_set_in_cache(cache_obj, true); 
+  pthread_mutex_unlock(&params->mutex_);
 
   return cache_obj;
 }
@@ -255,25 +265,13 @@ static cache_obj_t *LFU_insert(cache_t *cache, const request_t *req) {
  */
 static cache_obj_t *LFU_to_evict(cache_t *cache, const request_t *req) {
   LFU_params_t *params = (LFU_params_t *)(cache->eviction_params);
-  freq_node_t *min_freq_node = get_min_freq_node(params);
-  return min_freq_node->first_obj;
-}
 
-/**
- * @brief evict an object from the cache
- * it needs to call cache_evict_base before returning
- * which updates some metadata such as n_obj, occupied size, and hash table
- *
- * @param cache
- * @param req not used
- */
-static void LFU_evict(cache_t *cache, const request_t *req) {
-  LFU_params_t *params = (LFU_params_t *)(cache->eviction_params);
-
+  pthread_mutex_lock(&params->mutex_);
   freq_node_t *min_freq_node = get_min_freq_node(params);
   min_freq_node->n_obj--;
 
   cache_obj_t *obj_to_evict = min_freq_node->first_obj;
+  cache_obj_set_in_cache(obj_to_evict, false);
 
   remove_obj_from_list(&min_freq_node->first_obj, &min_freq_node->last_obj,
                        obj_to_evict);
@@ -287,28 +285,27 @@ static void LFU_evict(cache_t *cache, const request_t *req) {
     // /* update min freq */
     // update_min_freq(params);
   }
-
+  pthread_mutex_unlock(&params->mutex_);
+  
   cache_evict_base(cache, obj_to_evict, true);
+  return obj_to_evict;
+}
+
+/**
+ * @brief evict an object from the cache
+ * it needs to call cache_evict_base before returning
+ * which updates some metadata such as n_obj, occupied size, and hash table
+ *
+ * @param cache
+ * @param req not used
+ */
+static void LFU_evict(cache_t *cache, const request_t *req) {
+    LFU_to_evict(cache, req);
 }
 
 void LFU_remove_obj(cache_t *cache, cache_obj_t *obj) {
   assert(obj != NULL);
-  LFU_params_t *params = (LFU_params_t *)(cache->eviction_params);
-
-  gpointer key = GSIZE_TO_POINTER(obj->lfu.freq);
-  freq_node_t *freq_node = g_hash_table_lookup(params->freq_map, key);
-  DEBUG_ASSERT(freq_node->freq == obj->lfu.freq);
-  DEBUG_ASSERT(freq_node->n_obj > 0);
-
-  freq_node->n_obj--;
-  remove_obj_from_list(&freq_node->first_obj, &freq_node->last_obj, obj);
-
   cache_remove_obj_base(cache, obj, true);
-
-  if (freq_node->freq == params->min_freq && freq_node->n_obj == 0) {
-    /* update min freq */
-    update_min_freq(params);
-  }
 }
 
 /**
@@ -325,15 +322,13 @@ void LFU_remove_obj(cache_t *cache, cache_obj_t *obj) {
  * cache
  */
 bool LFU_remove(cache_t *cache, obj_id_t obj_id) {
-  LFU_params_t *params = (LFU_params_t *)(cache->eviction_params);
-  cache_obj_t *obj = hashtable_find_obj_id(cache->hashtable, obj_id);
-  if (obj == NULL) {
-    return false;
+  cache_obj_t *obj = hashtable_delete_obj_id(cache->hashtable, obj_id);
+  if(obj != NULL){
+    fetch_sub(&cache->n_obj, 1);
+    return true;
   }
-
-  LFU_remove_obj(cache, obj);
-
-  return true;
+  else
+    return false;
 }
 
 // ***********************************************************************

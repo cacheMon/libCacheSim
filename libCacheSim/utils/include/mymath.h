@@ -24,9 +24,23 @@ void set_rand_seed(uint64_t seed);
  * random number generator from Knuth MMIX
  * @return
  */
-static inline uint64_t next_rand() {
+static inline uint64_t next_rand(void) {
   rand_seed = 6364136223846793005 * rand_seed + 1442695040888963407;
   return rand_seed;
+}
+
+
+/**
+ *  generate reproducible pseudo rand sequence, used to test concurrent hashtable.
+ *  @method get_next_rand
+ *  @author Chaos
+ *  @date   2023-11-22
+ *  @param  cur           [current random number]
+ *  @return               [next random number in the sequence]
+ */
+static inline uint64_t get_next_rand(uint64_t cur) {
+  uint64_t next = 6364136223846793005 * cur + 1442695040888963407;
+  return next;
 }
 
 static inline long long next_power_of_2(long long N) {

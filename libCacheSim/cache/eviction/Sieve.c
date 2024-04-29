@@ -12,6 +12,8 @@ typedef struct {
   cache_obj_t *q_tail;
 
   cache_obj_t *pointer;
+  pthread_mutex_t mutex_;
+
 } Sieve_params_t;
 
 // ***********************************************************************
@@ -67,6 +69,7 @@ cache_t *Sieve_init(const common_cache_params_t ccache_params,
   params->pointer = NULL;
   params->q_head = NULL;
   params->q_tail = NULL;
+  pthread_mutex_init(&params->mutex_, NULL);
 
   return cache;
 }
@@ -77,7 +80,9 @@ cache_t *Sieve_init(const common_cache_params_t ccache_params,
  * @param cache
  */
 static void Sieve_free(cache_t *cache) {
-  free(cache->eviction_params);
+  Sieve_params_t *params = cache->eviction_params;
+  free_list(&params->q_head, &params->q_tail);
+  free(params);
   cache_struct_free(cache);
 }
 
@@ -102,10 +107,7 @@ static void Sieve_free(cache_t *cache) {
  */
 
 static bool Sieve_get(cache_t *cache, const request_t *req) {
-  Sieve_params_t *params = (Sieve_params_t *)cache->eviction_params;
-
   bool ck_hit = cache_get_base(cache, req);
-
   return ck_hit;
 }
 
@@ -128,7 +130,7 @@ static bool Sieve_get(cache_t *cache, const request_t *req) {
 static cache_obj_t *Sieve_find(cache_t *cache, const request_t *req,
                                const bool update_cache) {
   cache_obj_t *cache_obj = cache_find_base(cache, req, update_cache);
-  if (cache_obj != NULL && update_cache) {
+  if (cache_obj != NULL && update_cache && cache_obj_in_cache(cache_obj)) {
     cache_obj->sieve.freq = 1;
   }
 
@@ -149,65 +151,33 @@ static cache_obj_t *Sieve_find(cache_t *cache, const request_t *req,
 static cache_obj_t *Sieve_insert(cache_t *cache, const request_t *req) {
   Sieve_params_t *params = cache->eviction_params;
   cache_obj_t *obj = cache_insert_base(cache, req);
+  pthread_mutex_lock(&params->mutex_);
   prepend_obj_to_head(&params->q_head, &params->q_tail, obj);
   obj->sieve.freq = 0;
+  cache_obj_set_in_cache(obj, true); 
+  pthread_mutex_unlock(&params->mutex_);
 
   return obj;
 }
 
-/**
- * @brief find the object to be evicted
- * this function does not actually evict the object or update metadata
- * not all eviction algorithms support this function
- * because the eviction logic cannot be decoupled from finding eviction
- * candidate, so use assert(false) if you cannot support this function
- *
- * @param cache the cache
- * @return the object to be evicted
- */
-static cache_obj_t *Sieve_to_evict_with_freq(cache_t *cache,
-                                             const request_t *req,
-                                             int to_evict_freq) {
-  Sieve_params_t *params = cache->eviction_params;
-  cache_obj_t *pointer = params->pointer;
-  cache_obj_t *old_pointer = pointer;
-
-  /* if we have run one full around or first eviction */
-  if (pointer == NULL) pointer = params->q_tail;
-
-  /* find the first untouched */
-  while (pointer != NULL && pointer->sieve.freq > to_evict_freq) {
-    pointer = pointer->queue.prev;
-  }
-
-  /* if we have finished one around, start from the tail */
-  if (pointer == NULL) {
-    pointer = params->q_tail;
-    while (pointer != NULL && pointer->sieve.freq > to_evict_freq) {
-      pointer = pointer->queue.prev;
-    }
-  }
-
-  if (pointer == NULL) return NULL;
-
-  return pointer;
-}
-
 static cache_obj_t *Sieve_to_evict(cache_t *cache, const request_t *req) {
-  // because we do not change the frequency of the object,
-  // if all objects have frequency 1, we may return NULL
-  int to_evict_freq = 0;
+  Sieve_params_t *params = cache->eviction_params;
 
-  cache_obj_t *obj_to_evict =
-      Sieve_to_evict_with_freq(cache, req, to_evict_freq);
+  pthread_mutex_lock(&params->mutex_);
+  /* if we have run one full around or first eviction */
+  cache_obj_t *obj = params->pointer == NULL ? params->q_tail : params->pointer;
 
-  while (obj_to_evict == NULL) {
-    to_evict_freq += 1;
-
-    obj_to_evict = Sieve_to_evict_with_freq(cache, req, to_evict_freq);
+  while (obj->sieve.freq > 0) {
+    obj->sieve.freq -= 1;
+    obj = obj->queue.prev == NULL ? params->q_tail : obj->queue.prev;
   }
+  cache_obj_set_in_cache(obj, false);
+  params->pointer = obj->queue.prev;
+  remove_obj_from_list(&params->q_head, &params->q_tail, obj);
+  pthread_mutex_unlock(&params->mutex_);
 
-  return obj_to_evict;
+  cache_evict_base(cache, obj, true);
+  return obj;
 }
 
 /**
@@ -220,19 +190,7 @@ static cache_obj_t *Sieve_to_evict(cache_t *cache, const request_t *req) {
  * @param evicted_obj if not NULL, return the evicted object to caller
  */
 static void Sieve_evict(cache_t *cache, const request_t *req) {
-  Sieve_params_t *params = cache->eviction_params;
-
-  /* if we have run one full around or first eviction */
-  cache_obj_t *obj = params->pointer == NULL ? params->q_tail : params->pointer;
-
-  while (obj->sieve.freq > 0) {
-    obj->sieve.freq -= 1;
-    obj = obj->queue.prev == NULL ? params->q_tail : obj->queue.prev;
-  }
-
-  params->pointer = obj->queue.prev;
-  remove_obj_from_list(&params->q_head, &params->q_tail, obj);
-  cache_evict_base(cache, obj, true);
+  Sieve_to_evict(cache, req);
 }
 
 static void Sieve_remove_obj(cache_t *cache, cache_obj_t *obj_to_remove) {
@@ -241,7 +199,7 @@ static void Sieve_remove_obj(cache_t *cache, cache_obj_t *obj_to_remove) {
   if (obj_to_remove == params->pointer) {
     params->pointer = obj_to_remove->queue.prev;
   }
-  remove_obj_from_list(&params->q_head, &params->q_tail, obj_to_remove);
+  // remove_obj_from_list(&params->q_head, &params->q_tail, obj_to_remove);
   cache_remove_obj_base(cache, obj_to_remove, true);
 }
 
@@ -259,14 +217,13 @@ static void Sieve_remove_obj(cache_t *cache, cache_obj_t *obj_to_remove) {
  * cache
  */
 static bool Sieve_remove(cache_t *cache, const obj_id_t obj_id) {
-  cache_obj_t *obj = hashtable_find_obj_id(cache->hashtable, obj_id);
-  if (obj == NULL) {
-    return false;
+  cache_obj_t *obj = hashtable_delete_obj_id(cache->hashtable, obj_id);
+  if(obj != NULL){
+    fetch_sub(&cache->n_obj, 1);
+    return true;
   }
-
-  Sieve_remove_obj(cache, obj);
-
-  return true;
+  else
+    return false;
 }
 
 static void Sieve_verify(cache_t *cache) {

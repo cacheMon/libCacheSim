@@ -10,7 +10,12 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <unistd.h>
+#ifdef __linux__
 #include <sys/sysinfo.h>
+#elif __APPLE__
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#endif
 
 #include "../libCacheSim/include/libCacheSim.h"
 #include "../libCacheSim/include/libCacheSim/prefetchAlgo.h"
@@ -27,20 +32,30 @@
 
 #define DEFAULT_TTL (300 * 86400)
 
-static inline unsigned int _n_cores0() {
-  unsigned int eax = 11, ebx = 0, ecx = 1, edx = 0;
+// static inline unsigned int _n_cores0() {
+//   unsigned int eax = 11, ebx = 0, ecx = 1, edx = 0;
 
-  asm volatile("cpuid"
-               : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-               : "0"(eax), "2"(ecx)
-               :);
-  //  printf("Cores: %d\nThreads: %d\nActual thread: %d\n", eax, ebx, edx);
-  return ebx;
-}
+//   asm volatile("cpuid"
+//                : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+//                : "0"(eax), "2"(ecx)
+//                :);
+//   //  printf("Cores: %d\nThreads: %d\nActual thread: %d\n", eax, ebx, edx);
+//   return ebx;
+// }
 
-static inline unsigned int _n_cores() {
-  return get_nprocs();
+#ifdef __linux__
+static inline unsigned int _n_cores(void) { return get_nprocs(); }
+#elif __APPLE__
+static inline unsigned int _n_cores(void) {
+  int count;
+  size_t count_len = sizeof(count);
+  sysctlbyname("hw.physicalcpu", &count, &count_len, NULL, 0);
+  // fprintf(stderr, "you have %i cpu cores", count);
+  return count;
 }
+#else
+#error "what platform is this"
+#endif
 
 static void _detect_data_path(char *data_path, char *data_name) {
   sprintf(data_path, "data/%s", data_name);
@@ -60,7 +75,7 @@ static void _detect_data_path(char *data_path, char *data_name) {
 
 static reader_t *setup_oracleGeneralBin_reader(void) {
   char data_path[1024];
-  _detect_data_path(data_path, "trace.oracleGeneral.bin");
+  _detect_data_path(data_path, "cloudPhysicsIO.oracleGeneral.bin");
   reader_t *reader_oracle = setup_reader(data_path, ORACLE_GENERAL_TRACE, NULL);
   return reader_oracle;
 }
@@ -86,7 +101,7 @@ static reader_t *setup_vscsi_reader_with_ignored_obj_size(void) {
   char data_path[1024];
   reader_init_param_t *init_params = g_new0(reader_init_param_t, 1);
   init_params->ignore_obj_size = true;
-  _detect_data_path(data_path, "trace.vscsi");
+  _detect_data_path(data_path, "cloudPhysicsIO.vscsi");
   reader_t *reader_vscsi = setup_reader(data_path, VSCSI_TRACE, init_params);
   g_free(init_params);
   return reader_vscsi;
@@ -94,14 +109,14 @@ static reader_t *setup_vscsi_reader_with_ignored_obj_size(void) {
 
 static reader_t *setup_vscsi_reader(void) {
   char data_path[1024];
-  _detect_data_path(data_path, "trace.vscsi");
+  _detect_data_path(data_path, "cloudPhysicsIO.vscsi");
   reader_t *reader_vscsi = setup_reader(data_path, VSCSI_TRACE, NULL);
   return reader_vscsi;
 }
 
 static reader_t *setup_binary_reader(void) {
   char data_path[1024];
-  _detect_data_path(data_path, "trace.vscsi");
+  _detect_data_path(data_path, "cloudPhysicsIO.vscsi");
   reader_init_param_t *init_params_bin = g_new0(reader_init_param_t, 1);
   init_params_bin->binary_fmt_str = "<IIIHHQQ";
   init_params_bin->obj_size_field = 2;
@@ -115,7 +130,7 @@ static reader_t *setup_binary_reader(void) {
 
 static reader_t *setup_csv_reader_obj_str(void) {
   char data_path[1024];
-  _detect_data_path(data_path, "trace.csv");
+  _detect_data_path(data_path, "cloudPhysicsIO.csv");
   reader_init_param_t *init_params_csv = g_new0(reader_init_param_t, 1);
   init_params_csv->delimiter = ',';
   init_params_csv->time_field = 2;
@@ -130,7 +145,7 @@ static reader_t *setup_csv_reader_obj_str(void) {
 
 static reader_t *setup_csv_reader_obj_num(void) {
   char data_path[1024];
-  _detect_data_path(data_path, "trace.csv");
+  _detect_data_path(data_path, "cloudPhysicsIO.csv");
   reader_init_param_t *init_params_csv = g_new0(reader_init_param_t, 1);
   init_params_csv->delimiter = ',';
   init_params_csv->time_field = 2;
@@ -145,14 +160,14 @@ static reader_t *setup_csv_reader_obj_num(void) {
 
 static reader_t *setup_plaintxt_reader_num(void) {
   char data_path[1024];
-  _detect_data_path(data_path, "trace.txt");
+  _detect_data_path(data_path, "cloudPhysicsIO.txt");
   reader_init_param_t init_params = {.obj_id_is_num = true};
   return setup_reader(data_path, PLAIN_TXT_TRACE, &init_params);
 }
 
 static reader_t *setup_plaintxt_reader_str(void) {
   char data_path[1024];
-  _detect_data_path(data_path, "trace.txt");
+  _detect_data_path(data_path, "cloudPhysicsIO.txt");
   reader_init_param_t init_params = {.obj_id_is_num = false};
   return setup_reader(data_path, PLAIN_TXT_TRACE, &init_params);
 }
@@ -243,6 +258,12 @@ static cache_t *create_test_cache(const char *alg_name,
     cache = LRU_init(cc_params, NULL);
     cache->prefetcher =
         create_prefetcher("Mithril", NULL, cc_params.cache_size);
+  } else if (strcasecmp(alg_name, "OBL") == 0) {
+    cache = LRU_init(cc_params, NULL);
+    cache->prefetcher = create_prefetcher("OBL", NULL, cc_params.cache_size);
+  } else if (strcasecmp(alg_name, "PG") == 0) {
+    cache = LRU_init(cc_params, NULL);
+    cache->prefetcher = create_prefetcher("PG", NULL, cc_params.cache_size);
   } else {
     printf("cannot recognize algorithm %s\n", alg_name);
     exit(1);

@@ -138,6 +138,8 @@ cache_t *WTinyLFU_init(const common_cache_params_t ccache_params,
     params->main_cache = Hyperbolic_init(ccache_params_local, NULL);
   } else if (strcasecmp(params->main_cache_type, "LHD") == 0) {
     params->main_cache = LHD_init(ccache_params_local, NULL);
+  } else if (strcasecmp(params->main_cache_type, "SIEVE") == 0) {
+    params->main_cache = Sieve_init(ccache_params_local, NULL);
   } else {
     ERROR("WTinyLFU does not support %s \n", params->main_cache_type);
   }
@@ -251,6 +253,7 @@ cache_obj_t *WTinyLFU_insert(cache_t *cache, const request_t *req) {
 static cache_obj_t *WTinyLFU_to_evict(cache_t *cache, const request_t *req) {
   // Warning: don't use this function
   DEBUG_ASSERT(false);
+  return NULL;
 }
 
 static void WTinyLFU_evict(cache_t *cache, const request_t *req) {
@@ -347,8 +350,6 @@ static void WTinyLFU_parse_params(cache_t *cache,
   // params->max_request_num = 32 * cache->cache_size; // 32 * cache_size
 
   char *params_str = strdup(cache_specific_params);
-  char *old_params_str = params_str;
-  char *end;
   while (params_str != NULL && params_str[0] != '\0') {
     /* different parameters are separated by comma,
      * key and value are separated by = */

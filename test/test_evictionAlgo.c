@@ -5,8 +5,7 @@
 #include "../libCacheSim/utils/include/mymath.h"
 #include "common.h"
 
-// static const uint64_t req_cnt_true = 113872, req_byte_true = 4205978112;
-static const uint64_t req_cnt_true = 113872, req_byte_true = 4368040448;
+static const uint64_t g_req_cnt_true = 113872, g_req_byte_true = 4368040448;
 
 static void _verify_profiler_results(const cache_stat_t *res,
                                      uint64_t num_of_sizes,
@@ -24,23 +23,23 @@ static void _verify_profiler_results(const cache_stat_t *res,
 
 static void print_results(const cache_t *cache, const cache_stat_t *res) {
   printf("%s uint64_t cache_size[] = {", cache->cache_name);
-  printf("%ld", res[0].cache_size);
+  printf("%ld", (long)res[0].cache_size);
   for (uint64_t i = 1; i < CACHE_SIZE / STEP_SIZE; i++) {
-    printf(", %ld", res[i].cache_size);
+    printf(", %ld", (long)res[i].cache_size);
   }
   printf("};\n");
 
   printf("uint64_t miss_cnt_true[] = {");
-  printf("%ld", res[0].n_miss);
+  printf("%ld", (long)res[0].n_miss);
   for (uint64_t i = 1; i < CACHE_SIZE / STEP_SIZE; i++) {
-    printf(", %ld", res[i].n_miss);
+    printf(", %ld", (long)res[i].n_miss);
   }
   printf("};\n");
 
   printf("uint64_t miss_byte_true[] = {");
-  printf("%ld", res[0].n_miss_byte);
+  printf("%ld", (long)res[0].n_miss_byte);
   for (uint64_t i = 1; i < CACHE_SIZE / STEP_SIZE; i++) {
-    printf(", %ld", res[i].n_miss_byte);
+    printf(", %ld", (long)res[i].n_miss_byte);
   }
   printf("};\n");
 }
@@ -60,14 +59,13 @@ static void test_LRU(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
 
 static void test_Clock(gconstpointer user_data) {
-  /* myclock */
   uint64_t miss_cnt_true[] = {93313, 89775, 83411, 81328,
                               74815, 72283, 71927, 64456};
   uint64_t miss_byte_true[] = {4213887488, 4064512000, 3762650624, 3644467200,
@@ -82,8 +80,8 @@ static void test_Clock(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -103,8 +101,8 @@ static void test_FIFO(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -128,8 +126,8 @@ static void test_Belady(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -153,8 +151,8 @@ static void test_BeladySize(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -174,8 +172,8 @@ static void test_Random(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -195,8 +193,8 @@ static void test_LFU(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   g_free(res);
 }
@@ -216,8 +214,8 @@ static void test_LFUCpp(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -237,8 +235,8 @@ static void test_GDSF(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -258,8 +256,8 @@ static void test_LHD(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -279,8 +277,8 @@ static void test_Hyperbolic(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -300,8 +298,8 @@ static void test_LeCaR(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -321,8 +319,8 @@ static void test_Cacheus(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -342,8 +340,8 @@ static void test_SR_LRU(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -363,8 +361,8 @@ static void test_CR_LFU(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -384,8 +382,8 @@ static void test_LFUDA(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -405,8 +403,8 @@ static void test_MRU(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -426,8 +424,8 @@ static void test_ARC(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -447,8 +445,8 @@ static void test_SLRU(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -468,8 +466,8 @@ static void test_QDLP_FIFO(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -489,8 +487,8 @@ static void test_S3FIFO(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -510,8 +508,8 @@ static void test_Sieve(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }
@@ -535,8 +533,8 @@ static void test_LIRS(gconstpointer user_data) {
       reader, cache, STEP_SIZE, NULL, 0, 0, _n_cores());
 
   print_results(cache, res);
-  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, req_cnt_true,
-                           miss_cnt_true, req_byte_true, miss_byte_true);
+  _verify_profiler_results(res, CACHE_SIZE / STEP_SIZE, g_req_cnt_true,
+                           miss_cnt_true, g_req_byte_true, miss_byte_true);
   cache->cache_free(cache);
   my_free(sizeof(cache_stat_t), res);
 }

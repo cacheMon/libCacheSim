@@ -72,7 +72,7 @@ static struct argp_option options[] = {
     {"admission-params", OPTION_ADMISSION_PARAMS, "\"prob=0.8\"", 0,
      "params for admission algorithm", 4},
     {"prefetch", OPTION_PREFETCH_ALGO, "Mithril", 0,
-     "Prefetching algorithm: Mithril", 4},
+     "Prefetching algorithm: Mithril/OBL/PG/AMP", 4},
     {"prefetch-params", OPTION_PREFETCH_PARAMS, "\"block-size=65536\"", 0,
      "optional params for each prefetching algorithm, e.g., block-size=65536",
      4},
@@ -107,7 +107,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     case OPTION_NUM_THREAD:
       arguments->n_thread = atoi(arg);
       if (arguments->n_thread == 0 || arguments->n_thread == -1) {
-        arguments->n_thread = n_cores();
+        // arguments->n_thread = n_cores();
+        arguments->n_thread = 1;
       }
       break;
     case OPTION_TRACE_TYPE_PARAMS:
@@ -221,7 +222,8 @@ static void init_arg(struct arguments *args) {
   args->ignore_obj_size = false;
   args->consider_obj_metadata = false;
   args->report_interval = 3600 * 24;
-  args->n_thread = n_cores();
+  // args->n_thread = n_cores();
+  args->n_thread = 1;
   args->warmup_sec = -1;
   memset(args->ofilepath, 0, OFILEPATH_LEN);
   args->n_req = -1;
@@ -477,7 +479,7 @@ static void set_cache_size(struct arguments *args, reader_t *reader) {
   args->n_cache_size = n_cache_sizes;
 
   if (args->n_cache_size == 0) {
-    printf("working set %ld too small\n", wss);
+    printf("working set %ld too small\n", (long) wss);
     exit(0);
   }
 }
@@ -494,7 +496,7 @@ void print_parsed_args(struct arguments *args) {
       output_str, OUTPUT_STR_LEN - 1,
       "trace path: %s, trace_type %s, ofilepath "
       "%s, %d threads, warmup %d sec, total %d algo x %d size = %d caches",
-      args->trace_path, trace_type_str[args->trace_type], args->ofilepath,
+      args->trace_path, g_trace_type_name[args->trace_type], args->ofilepath,
       args->n_thread, args->warmup_sec, args->n_eviction_algo,
       args->n_cache_size, args->n_eviction_algo * args->n_cache_size);
 

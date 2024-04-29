@@ -1,4 +1,6 @@
 add_subdirectory(hash)
+add_subdirectory(test)
+
 set(source
         pqueue.c
         splay.c
@@ -7,6 +9,7 @@ set(source
         hash/murmur3.c
         hashtable/chainedHashtable.c
         hashtable/chainedHashTableV2.c
+        hashtable/cChainedHashTable.c
         )
 add_library (dataStructure ${source})
 

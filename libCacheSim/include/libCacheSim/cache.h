@@ -81,6 +81,7 @@ typedef struct {
   int64_t n_obj;
   int64_t occupied_byte;
   int64_t cache_size;
+  double runtime;
 
   /* current trace time, used to determine obj expiration */
   int64_t curr_rtime;
@@ -307,9 +308,10 @@ static inline void print_cache_stat(const cache_t *cache) {
   printf(
       "%s cache size %ld, occupied size %ld, n_req %ld, n_obj %ld, default TTL "
       "%ld, per_obj_metadata_size %d\n",
-      cache->cache_name, cache->cache_size, cache->get_occupied_byte(cache),
-      cache->n_req, cache->get_n_obj(cache), cache->default_ttl,
-      cache->obj_md_size);
+      cache->cache_name, (long)cache->cache_size,
+      (long)cache->get_occupied_byte(cache), (long)cache->n_req,
+      (long)cache->get_n_obj(cache), (long)cache->default_ttl,
+      (int)cache->obj_md_size);
 }
 
 /**

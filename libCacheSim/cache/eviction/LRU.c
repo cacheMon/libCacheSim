@@ -48,7 +48,8 @@ static void LRU_print_cache(const cache_t *cache);
  */
 cache_t *LRU_init(const common_cache_params_t ccache_params,
                   const char *cache_specific_params) {
-  cache_t *cache = cache_struct_init("LRU", ccache_params, cache_specific_params);
+  cache_t *cache =
+      cache_struct_init("LRU", ccache_params, cache_specific_params);
   cache->cache_init = LRU_init;
   cache->cache_free = LRU_free;
   cache->get = LRU_get;
@@ -75,8 +76,8 @@ cache_t *LRU_init(const common_cache_params_t ccache_params,
   LRU_params_t *params = malloc(sizeof(LRU_params_t));
   params->q_head = NULL;
   params->q_tail = NULL;
+  pthread_mutex_init(&params->mutex_, NULL);
   cache->eviction_params = params;
-
   return cache;
 }
 
@@ -85,7 +86,11 @@ cache_t *LRU_init(const common_cache_params_t ccache_params,
  *
  * @param cache
  */
-static void LRU_free(cache_t *cache) { cache_struct_free(cache); }
+static void LRU_free(cache_t *cache) {
+  LRU_params_t *params = (LRU_params_t *)cache->eviction_params;
+  free_list(&params->q_head, &params->q_tail);
+  cache_struct_free(cache); 
+}
 
 /**
  * @brief this function is the user facing API
@@ -130,14 +135,18 @@ static cache_obj_t *LRU_find(cache_t *cache, const request_t *req,
                              const bool update_cache) {
   LRU_params_t *params = (LRU_params_t *)cache->eviction_params;
   cache_obj_t *cache_obj = cache_find_base(cache, req, update_cache);
+  
+  pthread_mutex_lock(&params->mutex_);
+  if (cache_obj && likely(update_cache) && cache_obj_in_cache(cache_obj)) {
 
-  if (cache_obj && likely(update_cache)) {
     /* lru_head is the newest, move cur obj to lru_head */
 #ifdef USE_BELADY
     if (req->next_access_vtime != INT64_MAX)
 #endif
       move_obj_to_head(&params->q_head, &params->q_tail, cache_obj);
   }
+  pthread_mutex_unlock(&params->mutex_);
+
   return cache_obj;
 }
 
@@ -155,8 +164,13 @@ static cache_obj_t *LRU_insert(cache_t *cache, const request_t *req) {
   LRU_params_t *params = (LRU_params_t *)cache->eviction_params;
 
   cache_obj_t *obj = cache_insert_base(cache, req);
-  prepend_obj_to_head(&params->q_head, &params->q_tail, obj);
 
+  pthread_mutex_lock(&params->mutex_);
+  prepend_obj_to_head(&params->q_head, &params->q_tail, obj);
+  cache_obj_set_in_cache(obj, true); 
+  pthread_mutex_unlock(&params->mutex_);
+
+  // Now the object is ready for access.
   return obj;
 }
 
@@ -172,11 +186,34 @@ static cache_obj_t *LRU_insert(cache_t *cache, const request_t *req) {
  */
 static cache_obj_t *LRU_to_evict(cache_t *cache, const request_t *req) {
   LRU_params_t *params = (LRU_params_t *)cache->eviction_params;
+  DEBUG_ASSERT(params->q_tail != NULL);
 
-  DEBUG_ASSERT(params->q_tail != NULL || cache->occupied_byte == 0);
+  // we can simply call remove_obj_from_list here, but for the best performance,
+  // we chose to do it manually
+  // remove_obj_from_list(&params->q_head, &params->q_tail, obj)
 
-  cache->to_evict_candidate_gen_vtime = cache->n_req;
-  return params->q_tail;
+  pthread_mutex_lock(&params->mutex_);
+  cache_obj_t *obj_to_evict = params->q_tail;
+  cache_obj_set_in_cache(obj_to_evict, false);
+
+  // Remove the item from the hash table and prefetcher (if existed).
+  params->q_tail = params->q_tail->queue.prev;
+  if (likely(params->q_tail != NULL)) {
+    params->q_tail->queue.next = NULL;
+  } else {
+    /* cache->n_obj has not been updated */
+    // DEBUG_ASSERT(cache->n_obj == 1);
+    params->q_head = NULL;
+  }
+
+#if defined(TRACK_DEMOTION)
+  if (cache->track_demotion)
+    printf("%ld demote %ld %ld\n", cache->n_req, obj_to_evict->create_time,
+           obj_to_evict->misc.next_access_vtime);
+#endif
+  pthread_mutex_unlock(&params->mutex_);  
+  cache_evict_base(cache, obj_to_evict, true);
+  return obj_to_evict;
 }
 
 /**
@@ -188,30 +225,7 @@ static cache_obj_t *LRU_to_evict(cache_t *cache, const request_t *req) {
  * @param req not used
  */
 static void LRU_evict(cache_t *cache, const request_t *req) {
-  LRU_params_t *params = (LRU_params_t *)cache->eviction_params;
-  cache_obj_t *obj_to_evict = params->q_tail;
-  DEBUG_ASSERT(params->q_tail != NULL);
-
-  // we can simply call remove_obj_from_list here, but for the best performance,
-  // we chose to do it manually
-  // remove_obj_from_list(&params->q_head, &params->q_tail, obj)
-
-  params->q_tail = params->q_tail->queue.prev;
-  if (likely(params->q_tail != NULL)) {
-    params->q_tail->queue.next = NULL;
-  } else {
-    /* cache->n_obj has not been updated */
-    DEBUG_ASSERT(cache->n_obj == 1);
-    params->q_head = NULL;
-  }
-
-#if defined(TRACK_DEMOTION)
-  if (cache->track_demotion)
-  printf("%ld demote %ld %ld\n", cache->n_req, obj_to_evict->create_time,
-         obj_to_evict->misc.next_access_vtime);
-#endif
-
-  cache_evict_base(cache, obj_to_evict, true);
+  LRU_to_evict(cache, req);
 }
 
 /**
@@ -231,10 +245,6 @@ static void LRU_evict(cache_t *cache, const request_t *req) {
  */
 static void LRU_remove_obj(cache_t *cache, cache_obj_t *obj) {
   assert(obj != NULL);
-
-  LRU_params_t *params = (LRU_params_t *)cache->eviction_params;
-
-  remove_obj_from_list(&params->q_head, &params->q_tail, obj);
   cache_remove_obj_base(cache, obj, true);
 }
 
@@ -252,31 +262,32 @@ static void LRU_remove_obj(cache_t *cache, cache_obj_t *obj) {
  * cache
  */
 static bool LRU_remove(cache_t *cache, const obj_id_t obj_id) {
-  cache_obj_t *obj = hashtable_find_obj_id(cache->hashtable, obj_id);
-  if (obj == NULL) {
-    return false;
+  cache_obj_t *obj = hashtable_delete_obj_id(cache->hashtable, obj_id);
+  if(obj != NULL){
+    fetch_sub(&cache->n_obj, 1);
+    return true;
   }
-  LRU_params_t *params = (LRU_params_t *)cache->eviction_params;
-
-  remove_obj_from_list(&params->q_head, &params->q_tail, obj);
-  cache_remove_obj_base(cache, obj, true);
-
-  return true;
+  else
+    return false;
 }
 
 static void LRU_print_cache(const cache_t *cache) {
   LRU_params_t *params = (LRU_params_t *)cache->eviction_params;
+  pthread_mutex_lock(&params->mutex_);
+
   cache_obj_t *cur = params->q_head;
   // print from the most recent to the least recent
   if (cur == NULL) {
+    pthread_mutex_unlock(&params->mutex_);
     printf("empty\n");
     return;
   }
   while (cur != NULL) {
-    printf("%lu->", cur->obj_id);
+    printf("%lu->", (unsigned long)cur->obj_id);
     cur = cur->queue.next;
   }
   printf("END\n");
+  pthread_mutex_unlock(&params->mutex_);
 }
 
 #ifdef __cplusplus

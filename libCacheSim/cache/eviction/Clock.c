@@ -53,7 +53,8 @@ static bool Clock_remove(cache_t *cache, const obj_id_t obj_id);
  */
 cache_t *Clock_init(const common_cache_params_t ccache_params,
                     const char *cache_specific_params) {
-  cache_t *cache = cache_struct_init("Clock", ccache_params, cache_specific_params);
+  cache_t *cache =
+      cache_struct_init("Clock", ccache_params, cache_specific_params);
   cache->cache_init = Clock_init;
   cache->cache_free = Clock_free;
   cache->get = Clock_get;
@@ -98,7 +99,9 @@ cache_t *Clock_init(const common_cache_params_t ccache_params,
  * @param cache
  */
 static void Clock_free(cache_t *cache) {
-  free(cache->eviction_params);
+  Clock_params_t *params = (Clock_params_t *)cache->eviction_params;
+  free_list(&params->q_head, &params->q_tail);
+  free(params);
   cache_struct_free(cache);
 }
 
@@ -157,6 +160,24 @@ static cache_obj_t *Clock_find(cache_t *cache, const request_t *req,
   return obj;
 }
 
+void link_at_tail(Clock_params_t *params, cache_obj_t *obj) {
+  obj->queue.next = NULL;
+  cache_obj_t *tail = params->q_tail;
+
+  // this is the thread that first makes Tail points to the obj
+  // other threads must follow this, o.w. oldHead will be nullptr
+  while (!CAS(&params->q_tail, &tail, obj)) {}
+
+  if (tail != NULL) {
+    tail->queue.next = obj;
+  } else {
+    params->q_head = obj;
+  }
+#ifdef USE_BELADY
+  obj->next_access_vtime = req->next_access_vtime;
+#endif
+}
+
 /**
  * @brief insert an object into the cache,
  * update the hash table and cache metadata
@@ -169,15 +190,10 @@ static cache_obj_t *Clock_find(cache_t *cache, const request_t *req,
  */
 static cache_obj_t *Clock_insert(cache_t *cache, const request_t *req) {
   Clock_params_t *params = (Clock_params_t *)cache->eviction_params;
-
   cache_obj_t *obj = cache_insert_base(cache, req);
-  prepend_obj_to_head(&params->q_head, &params->q_tail, obj);
-
   obj->clock.freq = 0;
-#ifdef USE_BELADY
-  obj->next_access_vtime = req->next_access_vtime;
-#endif
-
+  link_at_tail(params, obj);
+  cache_obj_set_in_cache(obj, true);
   return obj;
 }
 
@@ -193,21 +209,24 @@ static cache_obj_t *Clock_insert(cache_t *cache, const request_t *req) {
  */
 static cache_obj_t *Clock_to_evict(cache_t *cache, const request_t *req) {
   Clock_params_t *params = (Clock_params_t *)cache->eviction_params;
-
-  int n_round = 0;
-  cache_obj_t *obj_to_evict = params->q_tail;
-#ifdef USE_BELADY
-  while (obj_to_evict->next_access_vtime != INT64_MAX) {
-#else
-  while (obj_to_evict->clock.freq - n_round >= 1) {
-#endif
-    obj_to_evict = obj_to_evict->queue.prev;
-    if (obj_to_evict == NULL) {
-      obj_to_evict = params->q_tail;
-      n_round += 1;
+  cache_obj_t *obj_to_evict;
+  while (true){
+    obj_to_evict = params->q_head;
+    while(!CAS(&params->q_head, &obj_to_evict, obj_to_evict->queue.next)) {}
+    if(obj_to_evict->queue.next != NULL) {
+      obj_to_evict->queue.next->queue.prev = NULL;
+    } else {
+      params->q_tail = NULL;
+    }
+    if (obj_to_evict->clock.freq >= 1) {
+      fetch_sub(&obj_to_evict->clock.freq, 1);
+      link_at_tail(params, obj_to_evict);
+    }
+    else{
+      break;
     }
   }
-
+  cache_evict_base(cache, obj_to_evict, true);
   return obj_to_evict;
 }
 
@@ -221,19 +240,7 @@ static cache_obj_t *Clock_to_evict(cache_t *cache, const request_t *req) {
  * @param evicted_obj if not NULL, return the evicted object to caller
  */
 static void Clock_evict(cache_t *cache, const request_t *req) {
-  Clock_params_t *params = (Clock_params_t *)cache->eviction_params;
-
-  cache_obj_t *obj_to_evict = params->q_tail;
-  while (obj_to_evict->clock.freq >= 1) {
-    obj_to_evict->clock.freq -= 1;
-    params->n_obj_rewritten += 1;
-    params->n_byte_rewritten += obj_to_evict->obj_size;
-    move_obj_to_head(&params->q_head, &params->q_tail, obj_to_evict);
-    obj_to_evict = params->q_tail;
-  }
-  
-  remove_obj_from_list(&params->q_head, &params->q_tail, obj_to_evict);
-  cache_evict_base(cache, obj_to_evict, true);
+  Clock_to_evict(cache, req);
 }
 
 /**
@@ -252,10 +259,10 @@ static void Clock_evict(cache_t *cache, const request_t *req) {
  * @param obj
  */
 static void Clock_remove_obj(cache_t *cache, cache_obj_t *obj) {
-  Clock_params_t *params = (Clock_params_t *)cache->eviction_params;
+  // Clock_params_t *params = (Clock_params_t *)cache->eviction_params;
 
-  DEBUG_ASSERT(obj != NULL);
-  remove_obj_from_list(&params->q_head, &params->q_tail, obj);
+  // DEBUG_ASSERT(obj != NULL);
+  // remove_obj_from_list(&params->q_head, &params->q_tail, obj);
   cache_remove_obj_base(cache, obj, true);
 }
 
@@ -273,14 +280,13 @@ static void Clock_remove_obj(cache_t *cache, cache_obj_t *obj) {
  * cache
  */
 static bool Clock_remove(cache_t *cache, const obj_id_t obj_id) {
-  cache_obj_t *obj = hashtable_find_obj_id(cache->hashtable, obj_id);
-  if (obj == NULL) {
-    return false;
+  cache_obj_t *obj = hashtable_delete_obj_id(cache->hashtable, obj_id);
+  if(obj != NULL){
+    fetch_sub(&cache->n_obj, 1);
+    return true;
   }
-
-  Clock_remove_obj(cache, obj);
-
-  return true;
+  else
+    return false;
 }
 
 // ***********************************************************************
@@ -291,8 +297,7 @@ static bool Clock_remove(cache_t *cache, const obj_id_t obj_id) {
 static const char *Clock_current_params(cache_t *cache,
                                         Clock_params_t *params) {
   static __thread char params_str[128];
-  int n =
-      snprintf(params_str, 128, "n-bit-counter=%d\n", params->n_bit_counter);
+  snprintf(params_str, 128, "n-bit-counter=%d\n", params->n_bit_counter);
 
   return params_str;
 }

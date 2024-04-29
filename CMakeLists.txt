@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.2)
+cmake_minimum_required(VERSION 3.12)
 project(libCacheSim)
 set(DESCRIPTION "a high performance cache simulation library")
 set(PROJECT_WEB "http://cachesim.com")
@@ -9,6 +9,9 @@ set(${PROJECT_NAME}_VERSION_PATCH 0)
 set(${PROJECT_NAME}_RELEASE_VERSION ${${PROJECT_NAME}_VERSION_MAJOR}.${${PROJECT_NAME}_VERSION_MINOR})
 set(${PROJECT_NAME}_VERSION ${${PROJECT_NAME}_RELEASE_VERSION}.${${PROJECT_NAME}_VERSION_PATCH})
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+set(CMAKE_CXX_EXTENSIONS Off)
 
 ########################################
 # define options #
@@ -19,7 +22,7 @@ option(USE_HUGEPAGE "use transparent hugepage" ON)
 option(ENABLE_TESTS "whether enable test" ON)
 option(ENABLE_GLCACHE "enable group-learned cache" OFF)
 option(SUPPORT_TTL "whether support TTL" OFF)
-option(SUPPORT_ZSTD_TRACE "whether support zstd trace" ON)
+option(OPT_SUPPORT_ZSTD_TRACE "whether support zstd trace" ON)
 option(ENABLE_LRB "enable LRB" OFF)
 set(LOG_LEVEL NONE CACHE STRING "change the logging level") 
 set_property(CACHE LOG_LEVEL PROPERTY STRINGS INFO WARN ERROR DEBUG VERBOSE VVERBOSE VVVERBOSE)
@@ -29,10 +32,10 @@ set_property(CACHE LOG_LEVEL PROPERTY STRINGS INFO WARN ERROR DEBUG VERBOSE VVER
 # detect platform #
 ########################################
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    message(STATUS "Mac OS X detected, version ${CMAKE_SYSTEM_VERSION}")
     add_definitions(-DOS_DARWIN)
-    if (NOT CMAKE_BUILD_TYPE)
-        set(CMAKE_BUILD_TYPE Debug)
-    endif()
+    set(CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH} "/opt/homebrew/include/")
+    set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "/opt/homebrew/")
 
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 #    set(CFLAGS "$ENV{CFLAGS} " "-Wl,--export-dynamic ")
@@ -102,7 +105,7 @@ endif()
 message(STATUS "CMAKE_CXX_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG} CMAKE_CXX_FLAGS_RELWITHDEBINFO ${CMAKE_CXX_FLAGS_RELWITHDEBINFO} CMAKE_CXX_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE}")
 # string( REPLACE "/DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 
-message(STATUS "SUPPORT TTL ${SUPPORT_TTL}, USE_HUGEPAGE ${USE_HUGEPAGE}, LOGLEVEL ${LOG_LEVEL}, ENABLE_GLCACHE ${ENABLE_GLCACHE}, ENABLE_LRB ${ENABLE_LRB}, SUPPORT_ZSTD_TRACE ${SUPPORT_ZSTD_TRACE}")
+message(STATUS "SUPPORT TTL ${SUPPORT_TTL}, USE_HUGEPAGE ${USE_HUGEPAGE}, LOGLEVEL ${LOG_LEVEL}, ENABLE_GLCACHE ${ENABLE_GLCACHE}, ENABLE_LRB ${ENABLE_LRB}, OPT_SUPPORT_ZSTD_TRACE ${OPT_SUPPORT_ZSTD_TRACE}")
 
 # add_compile_options(-fsanitize=address)
 # add_link_options(-fsanitize=address)
@@ -114,13 +117,11 @@ message(STATUS "SUPPORT TTL ${SUPPORT_TTL}, USE_HUGEPAGE ${USE_HUGEPAGE}, LOGLEV
 set(CFLAGS "$ENV{CFLAGS} "
         "-Wall -Wshadow -Winline "
         "-Wno-unused "
-        "-Wstrict-prototypes -Wmissing-prototypes "
+        "-Wstrict-prototypes "
+        # "-Wmissing-prototypes "
         "-Wmissing-declarations "
         "-Wredundant-decls "
-        "-Wunused-value -Wunused-variable "
-        "-std=c11 "
         "-fno-strict-aliasing "
-        "-O0 "
         )
 
 
@@ -140,24 +141,25 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 find_package(GLib REQUIRED)
 include_directories(${GLib_INCLUDE_DIRS})
 set(LIBS ${LIBS} ${GLib_LIBRARY})
-#if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-#    pkg_check_modules(GLib2 REQUIRED Glib-2.0)
-#    include_directories(${GLib2_INCLUDE_DIRS})
-#    #    add_compile_options("${LDFLAGS}")
-#    link_libraries(${GLib2_LDFLAGS})
-#endif()
 
-if (SUPPORT_ZSTD_TRACE)
+
+find_package(argp REQUIRED)
+include_directories(${ARGP_INCLUDE_DIRS})
+set(LIBS ${LIBS} ${ARGP_LIBRARY})
+
+if (OPT_SUPPORT_ZSTD_TRACE)
     add_compile_definitions(SUPPORT_ZSTD_TRACE=1)
     find_package(ZSTD)
+    # https://stackoverflow.com/questions/61377055/cannot-find-gflags-gflags-h-while-building-library-osx/61379123#61379123
+    include_directories(${ZSTD_INCLUDE_DIR})
     if ("${ZSTD_LIBRARIES}" STREQUAL "") 
         message(FATAL_ERROR "zstd not found")
     endif()
     link_libraries(${ZSTD_LIBRARIES})
-    message(STATUS "ZSTD_INCLUDE_DIRS ${ZSTD_INCLUDE_DIRS}, ZSTD_LIBRARIES ${ZSTD_LIBRARIES}")
+    message(STATUS "ZSTD_INCLUDE_DIR ${ZSTD_INCLUDE_DIR}, ZSTD_LIBRARIES ${ZSTD_LIBRARIES}")
 else()
     remove_definitions(SUPPORT_ZSTD_TRACE)
-endif(SUPPORT_ZSTD_TRACE)
+endif(OPT_SUPPORT_ZSTD_TRACE)
 
 
 # libgoogle-perftools-dev google-perftools
@@ -222,7 +224,7 @@ message(STATUS "<<++=====------------------/\\------------------=====++>>")
 message(STATUS "================== dependency related ==================")
 message(STATUS "glib found?     ${GLib_FOUND} - LIBS=${GLib_LIBRARY}, header =${GLib_INCLUDE_DIRS}")
 message(STATUS "tcmalloc found? ${Tcmalloc_FOUND} - LIBS=${Tcmalloc_LIBRARIES}, header=${Tcmalloc_INCLUDE_DIRS}")
-message(STATUS "ZSTD found? ${ZSTD_FOUND} - LIBS=${ZSTD_LIBRARIES}, header=${ZSTD_INCLUDE_DIRS}")
+message(STATUS "ZSTD found? ${ZSTD_FOUND} - LIBS=${ZSTD_LIBRARIES}, header=${ZSTD_INCLUDE_DIR}")
 
 message(STATUS "==================== CMake related =====================")
 message(STATUS "platform          = ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_VERSION}")
@@ -311,14 +313,24 @@ if (ENABLE_LRB)
     )
 endif(ENABLE_LRB)
 
-file(GLOB reader_source 
-        ${PROJECT_SOURCE_DIR}/libCacheSim/traceReader/*.c 
-        ${PROJECT_SOURCE_DIR}/libCacheSim/traceReader/generalReader/*.c 
+set(reader_source 
+        ${PROJECT_SOURCE_DIR}/libCacheSim/traceReader/reader.c 
+        ${PROJECT_SOURCE_DIR}/libCacheSim/traceReader/generalReader/binary.c 
+        ${PROJECT_SOURCE_DIR}/libCacheSim/traceReader/generalReader/csv.c 
+        ${PROJECT_SOURCE_DIR}/libCacheSim/traceReader/generalReader/lcs.c 
+        ${PROJECT_SOURCE_DIR}/libCacheSim/traceReader/generalReader/libcsv.c 
+        ${PROJECT_SOURCE_DIR}/libCacheSim/traceReader/generalReader/txt.c 
     )
+if (OPT_SUPPORT_ZSTD_TRACE)
+    set (reader_source
+            ${reader_source} ${PROJECT_SOURCE_DIR}/libCacheSim/traceReader/generalReader/zstdReader.c
+    )
+endif(OPT_SUPPORT_ZSTD_TRACE)
+
 file(GLOB dataStructure_source
         ${PROJECT_SOURCE_DIR}/libCacheSim/dataStructure/*.c
         ${PROJECT_SOURCE_DIR}/libCacheSim/dataStructure/hashtable/*.c
-        ${PROJECT_SOURCE_DIR}/libCacheSim/dataStructure/hash/*.c
+        ${PROJECT_SOURCE_DIR}/libCacheSim/dataStructure/hash/murmur3.c
     )
 
 file(GLOB profiler_source
@@ -335,7 +347,8 @@ set(LIB_SOURCE ${LIB_SOURCE} ${cache_source} ${reader_source} ${dataStructure_so
 # # https://stackoverflow.com/questions/32469953/why-is-cmake-designed-so-that-it-removes-runtime-path-when-installing
 SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-add_library(${PROJECT_NAME} SHARED ${LIB_SOURCE})
+add_library(${PROJECT_NAME} ${LIB_SOURCE})
+# add_library(${PROJECT_NAME} SHARED ${LIB_SOURCE})
 set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${${PROJECT_NAME}_VERSION})
 set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE C)
 set_target_properties(${PROJECT_NAME} PROPERTIES PUBLIC_HEADER ${PROJECT_SOURCE_DIR}/libCacheSim/include/libCacheSim.h)
@@ -354,12 +367,6 @@ install(TARGETS ${PROJECT_NAME}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-
-
-# #target_compile_definitions(binBenchmark PRIVATE HASH=0xb2)
-# #add_executable(binBenchmark libCacheSim/benchmark/main.c)
-# #target_link_libraries(binBenchmark benchmark cachelib evictionAlgos traceReader profiler dataStructure utils
-# #        ${LIBS})
 #############################
 
 

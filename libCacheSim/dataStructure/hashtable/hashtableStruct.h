@@ -10,8 +10,10 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include "../../include/libCacheSim/cacheObj.h"
+#include "../../utils/include/mymutex.h"
 
 #define hashsize(n) ((uint64_t)1 << (uint16_t)(n))
 #define hashsizeULL(n) ((unsigned long long)1 << (uint16_t)(n))
@@ -40,6 +42,7 @@ typedef struct hashtable {
     };
     void *extra_data;
   };
+  RWLocks_t* rwlocks_;
 } hashtable_t;
 
 #ifdef __cplusplus

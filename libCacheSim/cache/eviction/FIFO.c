@@ -76,7 +76,9 @@ cache_t *FIFO_init(const common_cache_params_t ccache_params,
  * @param cache
  */
 static void FIFO_free(cache_t *cache) {
-  free(cache->eviction_params);
+  FIFO_params_t *params = (FIFO_params_t *)cache->eviction_params;
+  free_list(&params->q_head, &params->q_tail);
+  free(params);
   cache_struct_free(cache);
 }
 
@@ -122,7 +124,7 @@ static bool FIFO_get(cache_t *cache, const request_t *req) {
 static cache_obj_t *FIFO_find(cache_t *cache, const request_t *req,
                                const bool update_cache) {
   return cache_find_base(cache, req, update_cache);
-}
+} 
 
 /**
  * @brief insert an object into the cache,
@@ -137,8 +139,17 @@ static cache_obj_t *FIFO_find(cache_t *cache, const request_t *req,
 static cache_obj_t *FIFO_insert(cache_t *cache, const request_t *req) {
   FIFO_params_t *params = (FIFO_params_t *)cache->eviction_params;
   cache_obj_t *obj = cache_insert_base(cache, req);
-  prepend_obj_to_head(&params->q_head, &params->q_tail, obj);
-
+  // prepend_obj_to_head(&params->q_head, &params->q_tail, obj);
+  // Use CAS to update the q_tail
+  obj->queue.next = NULL;
+  cache_obj_t *tail = params->q_tail;
+  while (!CAS(&params->q_tail, &tail, obj)) {}
+  if (tail != NULL) {
+    tail->queue.next = obj;
+  } else {
+    params->q_head = obj;
+  }
+  cache_obj_set_in_cache(obj, true);
   return obj;
 }
 
@@ -154,7 +165,21 @@ static cache_obj_t *FIFO_insert(cache_t *cache, const request_t *req) {
  */
 static cache_obj_t *FIFO_to_evict(cache_t *cache, const request_t *req) {
   FIFO_params_t *params = (FIFO_params_t *)cache->eviction_params;
-  return params->q_tail;
+  cache_obj_t *obj_to_evict = params->q_head;
+  DEBUG_ASSERT(params->q_head != NULL);
+
+  // we can simply call remove_obj_from_list here, but for the best performance,
+  // we chose to do it manually
+  // remove_obj_from_list(&params->q_head, &params->q_tail, obj);
+
+  while(!CAS(&params->q_head, &obj_to_evict, obj_to_evict->queue.next)) {}
+  if (obj_to_evict->queue.next != NULL) {
+    obj_to_evict->queue.next->queue.prev = NULL;
+  } else {
+    params->q_tail = NULL;
+  }
+  cache_evict_base(cache, obj_to_evict, true);
+  return obj_to_evict;
 }
 
 /**
@@ -167,24 +192,7 @@ static cache_obj_t *FIFO_to_evict(cache_t *cache, const request_t *req) {
  * @param evicted_obj if not NULL, return the evicted object to caller
  */
 static void FIFO_evict(cache_t *cache, const request_t *req) {
-  FIFO_params_t *params = (FIFO_params_t *)cache->eviction_params;
-  cache_obj_t *obj_to_evict = params->q_tail;
-  DEBUG_ASSERT(params->q_tail != NULL);
-
-  // we can simply call remove_obj_from_list here, but for the best performance,
-  // we chose to do it manually
-  // remove_obj_from_list(&params->q_head, &params->q_tail, obj);
-
-  params->q_tail = params->q_tail->queue.prev;
-  if (likely(params->q_tail != NULL)) {
-    params->q_tail->queue.next = NULL;
-  } else {
-    /* cache->n_obj has not been updated */
-    DEBUG_ASSERT(cache->n_obj == 1);
-    params->q_head = NULL;
-  }
-
-  cache_evict_base(cache, obj_to_evict, true);
+  FIFO_to_evict(cache, req);
 }
 
 /**
@@ -201,17 +209,13 @@ static void FIFO_evict(cache_t *cache, const request_t *req) {
  * cache
  */
 static bool FIFO_remove(cache_t *cache, const obj_id_t obj_id) {
-  cache_obj_t *obj = hashtable_find_obj_id(cache->hashtable, obj_id);
-  if (obj == NULL) {
-    return false;
+  cache_obj_t *obj = hashtable_delete_obj_id(cache->hashtable, obj_id);
+  if(obj != NULL){
+    fetch_sub(&cache->n_obj, 1);
+    return true;
   }
-
-  FIFO_params_t *params = (FIFO_params_t *)cache->eviction_params;
-
-  remove_obj_from_list(&params->q_head, &params->q_tail, obj);
-  cache_remove_obj_base(cache, obj, true);
-
-  return true;
+  else
+    return false;
 }
 
 #ifdef __cplusplus

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cache.h"
+#include <pthread.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,6 +16,7 @@ typedef struct {
 typedef struct {
   cache_obj_t *q_head;
   cache_obj_t *q_tail;
+  pthread_mutex_t mutex_;
 } LRU_params_t;
 
 /* used by LFU related */
@@ -23,6 +25,7 @@ typedef struct freq_node {
   cache_obj_t *first_obj;
   cache_obj_t *last_obj;
   uint32_t n_obj;
+  pthread_mutex_t mutex_;
 } freq_node_t;
 
 typedef struct {
@@ -97,6 +100,9 @@ cache_t *MRU_init(const common_cache_params_t ccache_params,
 cache_t *Random_init(const common_cache_params_t ccache_params,
                      const char *cache_specific_params);
 
+cache_t *RandomTwo_init(const common_cache_params_t ccache_params,
+                     const char *cache_specific_params);
+
 cache_t *SLRU_init(const common_cache_params_t ccache_params,
                    const char *cache_specific_params);
 
@@ -129,6 +135,7 @@ cache_t *flashProb_init(const common_cache_params_t ccache_params,
 
 cache_t *LRU_Prob_init(const common_cache_params_t ccache_params,
                        const char *cache_specific_params);
+
 cache_t *SFIFOv0_init(const common_cache_params_t ccache_params,
                       const char *cache_specific_params);
 
@@ -175,9 +182,6 @@ cache_t *LP_ARC_init(const common_cache_params_t ccache_params,
                      const char *cache_specific_params);
 
 cache_t *LP_TwoQ_init(const common_cache_params_t ccache_params,
-                      const char *cache_specific_params);
-
-cache_t *MyClock_init(const common_cache_params_t ccache_params,
                       const char *cache_specific_params);
 
 cache_t *QDLPv0_init(const common_cache_params_t ccache_params,

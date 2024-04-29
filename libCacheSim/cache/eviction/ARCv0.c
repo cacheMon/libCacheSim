@@ -30,8 +30,6 @@ extern "C" {
 // #define LAZY_PROMOTION
 // #define QUICK_DEMOTION
 
-// #define USE_MYCLOCK
-
 typedef struct ARCv0_params {
   // L1_data is T1 in the paper, L1_ghost is B1 in the paper
   cache_t *T1;
@@ -93,7 +91,8 @@ static bool ARCv0_get_debug(cache_t *cache, const request_t *req);
  */
 cache_t *ARCv0_init(const common_cache_params_t ccache_params,
                     const char *cache_specific_params) {
-  cache_t *cache = cache_struct_init("ARCv0", ccache_params, cache_specific_params);
+  cache_t *cache =
+      cache_struct_init("ARCv0", ccache_params, cache_specific_params);
   cache->cache_init = ARCv0_init;
   cache->cache_free = ARCv0_free;
   cache->get = ARCv0_get;
@@ -140,12 +139,6 @@ cache_t *ARCv0_init(const common_cache_params_t ccache_params,
   snprintf(cache->cache_name, CACHE_NAME_ARRAY_LEN, "ARCv0-QD");
 #endif
 
-#ifdef USE_MYCLOCK
-  params->T2->cache_free(params->T2);
-  params->T2 = MyClock_init(ccache_params_local, NULL);
-  snprintf(cache->cache_name, CACHE_NAME_ARRAY_LEN, "ARCv0-myclock");
-#endif
-
   return cache;
 }
 
@@ -186,7 +179,7 @@ static void ARCv0_free(cache_t *cache) {
  * @return true if cache hit, false if cache miss
  */
 static bool ARCv0_get(cache_t *cache, const request_t *req) {
-  ARCv0_params_t *params = (ARCv0_params_t *)(cache->eviction_params);
+  // ARCv0_params_t *params = (ARCv0_params_t *)(cache->eviction_params);
 #ifdef DEBUG_MODE
   return ARCv0_get_debug(cache, req);
 #else
@@ -257,7 +250,7 @@ static cache_obj_t *ARCv0_find(cache_t *cache, const request_t *req,
     }
 #ifdef QUICK_DEMOTION
     // params->p = MIN(params->p, cache->cache_size/10);
-    params->p = cache->cache_size/10;
+    params->p = cache->cache_size / 10;
 #endif
   } else {
     // cache hit, case I: x in L1_data or L2_data
@@ -534,13 +527,12 @@ static void ARCv0_parse_params(cache_t *cache,
 
   char *params_str = strdup(cache_specific_params);
   char *old_params_str = params_str;
-  char *end;
 
   while (params_str != NULL && params_str[0] != '\0') {
     /* different parameters are separated by comma,
      * key and value are separated by = */
     char *key = strsep((char **)&params_str, "=");
-    char *value = strsep((char **)&params_str, ",");
+    // char *value = strsep((char **)&params_str, ",");
 
     // skip the white space
     while (params_str != NULL && *params_str == ' ') {
@@ -581,7 +573,8 @@ static bool ARCv0_get_debug(cache_t *cache, const request_t *req) {
 
   cache->n_req += 1;
 
-  printf("%ld obj_id %ld: p %.2lf\n", cache->n_req, req->obj_id, params->p);
+  printf("%ld obj_id %ld: p %.2lf\n", (long)cache->n_req, (long)req->obj_id,
+         params->p);
   print_cache(cache);
   printf("==================================\n");
 

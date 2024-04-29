@@ -2,11 +2,10 @@
 // Created by Juncheng Yang on 6/20/20.
 //
 
-#include "../include/libCacheSim/cache.h"
-
 #include "../dataStructure/hashtable/hashtable.h"
+#include "../include/libCacheSim/cache.h"
 #include "../include/libCacheSim/prefetchAlgo.h"
-
+#include "../utils/include/mymutex.h"
 /** this file contains both base function, which should be called by all
  *eviction algorithms, and the queue related functions, which should be called
  *by algorithm that uses only one queue and needs to update the queue such as
@@ -78,7 +77,7 @@ void cache_struct_free(cache_t *cache) {
 }
 
 /**
- * @brief create a new cache with the same size as the old cache
+ * @brief create a new cache with the same size as the old cache. Not thread-safe.
  *
  * @param old_cache
  * @param new_size
@@ -102,7 +101,7 @@ cache_t *clone_cache(const cache_t *old_cache) {
   return cache;
 }
 /**
- * @brief this function is called by all eviction algorithms to clone old cache
+ * @brief this function is called by all eviction algorithms to clone old cache. Not thread-safe.
  * with new size
  *
  * @param old_cache
@@ -145,7 +144,7 @@ bool cache_can_insert_default(cache_t *cache, const request_t *req) {
     if (admissioner->admit(admissioner, req) == false) {
       DEBUG_ONCE(
           "admission algorithm does not admit: req %ld, obj %lu, size %lu\n",
-          cache->n_req, (unsigned long)req->obj_id,
+          (long)cache->n_req, (unsigned long)req->obj_id,
           (unsigned long)req->obj_size);
       return false;
     }
@@ -153,7 +152,7 @@ bool cache_can_insert_default(cache_t *cache, const request_t *req) {
 
   if (req->obj_size + cache->obj_md_size > cache->cache_size) {
     WARN_ONCE("%ld req, obj %lu, size %lu larger than cache size %lu\n",
-              cache->n_req, (unsigned long)req->obj_id,
+              (long)cache->n_req, (unsigned long)req->obj_id,
               (unsigned long)req->obj_size, (unsigned long)cache->cache_size);
     return false;
   }
@@ -176,7 +175,6 @@ bool cache_can_insert_default(cache_t *cache, const request_t *req) {
 cache_obj_t *cache_find_base(cache_t *cache, const request_t *req,
                              const bool update_cache) {
   cache_obj_t *cache_obj = hashtable_find(cache->hashtable, req);
-
   // "update_cache = true" means that it is a real user request, use handle_find
   // to update prefetcher's state
   if (cache->prefetcher && cache->prefetcher->handle_find && update_cache) {
@@ -197,10 +195,10 @@ cache_obj_t *cache_find_base(cache_t *cache, const request_t *req,
 
     if (update_cache) {
       cache_obj->misc.next_access_vtime = req->next_access_vtime;
-      cache_obj->misc.freq += 1;
+      // cache_obj->misc.freq += 1;
+      fetch_add(&cache_obj->misc.freq, 1);
     }
   }
-
   return cache_obj;
 }
 
@@ -213,8 +211,6 @@ cache_obj_t *cache_find_base(cache_t *cache, const request_t *req,
  *    update_metadata
  *    return true
  * else:
- *    if cache does not have enough space:
- *        evict until it has space to insert
  *    insert the object
  *    return false
  * ```
@@ -225,32 +221,26 @@ cache_obj_t *cache_find_base(cache_t *cache, const request_t *req,
  */
 bool cache_get_base(cache_t *cache, const request_t *req) {
   cache->n_req += 1;
-
   VERBOSE("******* %s req %ld, obj %ld, obj_size %ld, cache size %ld/%ld\n",
           cache->cache_name, cache->n_req, req->obj_id, req->obj_size,
           cache->get_occupied_byte(cache), cache->cache_size);
 
   cache_obj_t *obj = cache->find(cache, req, true);
   bool hit = (obj != NULL);
-
   if (hit) {
     VVERBOSE("req %ld, obj %ld --- cache hit\n", cache->n_req, req->obj_id);
-  } else if (!cache->can_insert(cache, req)) {
-    VVERBOSE("req %ld, obj %ld --- cache miss cannot insert\n", cache->n_req,
-             req->obj_id);
   } else {
-    while (cache->get_occupied_byte(cache) + req->obj_size +
-               cache->obj_md_size >
-           cache->cache_size) {
-      cache->evict(cache, req);
-    }
+    // while (cache->get_occupied_byte(cache) + req->obj_size +
+    //            cache->obj_md_size >
+    //        cache->cache_size) {
+    //   cache->evict(cache, req);
+    // }
     cache->insert(cache, req);
   }
-
   if (cache->prefetcher && cache->prefetcher->prefetch) {
     cache->prefetcher->prefetch(cache, req);
   }
-
+  // INFO("req %ld, obj %ld --- cache hit %d\n", cache->n_req, req->obj_id, hit);
   return hit;
 }
 
@@ -260,37 +250,65 @@ bool cache_get_base(cache_t *cache, const request_t *req) {
  * this function assumes the cache has enough space
  * and eviction is not part of this function
  *
+ * ```
+ * if cache not full:
+ *    create an object;
+ * else:
+ *    evict an object;
+ *    reassign the object;
+ * insert the object;
+ * return false
+ * ```
+ * 
  * @param cache
  * @param req
  * @return the inserted object
  */
 cache_obj_t *cache_insert_base(cache_t *cache, const request_t *req) {
-  cache_obj_t *cache_obj = hashtable_insert(cache->hashtable, req);
-  cache->occupied_byte +=
-      (int64_t)cache_obj->obj_size + (int64_t)cache->obj_md_size;
-  cache->n_obj += 1;
+  cache_obj_t *new_cache_obj;
+  if(cache->get_occupied_byte(cache) + req->obj_size +
+               cache->obj_md_size < cache->cache_size){
+    new_cache_obj = create_cache_obj_from_request(req);
+  }
+  else{
+    new_cache_obj = cache->to_evict(cache, req);
+    copy_request_to_cache_obj(new_cache_obj, req);
+  }
+
+
+  // cache_obj_t *cache_obj = hashtable_insert(cache->hashtable, req);
+  hashtable_insert_obj(cache->hashtable, new_cache_obj);
+  // cache->occupied_byte +=
+  //     (int64_t)cache_obj->obj_size + (int64_t)cache->obj_md_size;
+  fetch_add(&cache->occupied_byte, 
+      (int64_t)new_cache_obj->obj_size + (int64_t)cache->obj_md_size);
+
+  // cache->n_obj += 1;
+  fetch_add(&cache->n_obj, 1);
+
 
 #ifdef SUPPORT_TTL
   if (cache->default_ttl != 0 && req->ttl == 0) {
-    cache_obj->exp_time = (int32_t)cache->default_ttl + req->clock_time;
+    uint32_t exp_time = (int32_t)cache->default_ttl + req->clock_time;
+    new_cache_obj->exp_time = exp_time;
   }
 #endif
 
 #if defined(TRACK_EVICTION_V_AGE) || defined(TRACK_DEMOTION) || \
     defined(TRACK_CREATE_TIME)
-  cache_obj->create_time = CURR_TIME(cache, req);
+  new_cache_obj->create_time = CURR_TIME(cache, req);
 #endif
 
-  cache_obj->misc.next_access_vtime = req->next_access_vtime;
-  cache_obj->misc.freq = 0;
+  new_cache_obj->misc.next_access_vtime = req->next_access_vtime;
+  new_cache_obj->misc.freq = 0;
 
-  return cache_obj;
+  return new_cache_obj;
 }
 
 /**
  * @brief this function is called by all eviction algorithms in the eviction
- * function, it updates the cache metadata. Because it frees the object struct,
- * it needs to be called at the end of the eviction function.
+ * function, it updates the cache metadata. It needs to be called at the end 
+ * of the eviction function.
  *
  * @param cache the cache
  * @param obj the object to be removed
@@ -314,24 +332,24 @@ void cache_evict_base(cache_t *cache, cache_obj_t *obj,
   }
 
   cache_remove_obj_base(cache, obj, remove_from_hashtable);
+  // cache->occupied_byte -= (obj->obj_size + cache->obj_md_size);
+  fetch_sub(&cache->occupied_byte, 
+    obj->obj_size + cache->obj_md_size);
 }
 
 /**
  * @brief this function is called by all eviction algorithms that
  * need to remove an object from the cache, it updates the cache metadata,
- * because it frees the object struct, it needs to be called at the end of
- * the eviction function.
+ * because it not frees the object struct, while it does not update the 
+ * eviction data structure. This stale item will be removed in the next eviction.
  *
  * @param cache the cache
  * @param obj the object to be removed
  */
 void cache_remove_obj_base(cache_t *cache, cache_obj_t *obj,
                            bool remove_from_hashtable) {
-  DEBUG_ASSERT(cache->occupied_byte >= obj->obj_size + cache->obj_md_size);
-  cache->occupied_byte -= (obj->obj_size + cache->obj_md_size);
-  cache->n_obj -= 1;
-  if (remove_from_hashtable) {
-    hashtable_delete(cache->hashtable, obj);
+  if(hashtable_try_delete(cache->hashtable, obj)){
+    fetch_sub(&cache->n_obj, 1);
   }
 }
 

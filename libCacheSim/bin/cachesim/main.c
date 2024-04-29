@@ -19,14 +19,14 @@ int main(int argc, char **argv) {
   if (args.n_cache_size == 0) {
     ERROR("no cache size found\n");
   }
+  // if (args.n_cache_size * args.n_eviction_algo == 1) {
+  //   INFO("simulate with single cache\n");
+  //   simulate(args.reader, args.caches[0], args.report_interval, args.warmup_sec, args.n_thread, 
+  //            args.ofilepath);
 
-  if (args.n_cache_size * args.n_eviction_algo == 1) {
-    simulate(args.reader, args.caches[0], args.report_interval, args.warmup_sec,
-             args.ofilepath);
-
-    free_arg(&args);
-    return 0;
-  }
+  //   free_arg(&args);
+  //   return 0;
+  // }
 
   // cache_stat_t *result = simulate_at_multi_sizes(
   //     args.reader, args.cache, args.n_cache_size, args.cache_sizes, NULL, 0,
@@ -61,12 +61,13 @@ int main(int argc, char **argv) {
   for (int i = 0; i < args.n_cache_size * args.n_eviction_algo; i++) {
     snprintf(output_str, 1024,
              "%s %32s cache size %8ld%s, %lld req, miss ratio %.4lf, byte miss "
-             "ratio %.4lf\n",
+             "ratio %.4lf, throughput %.2lf MQPS\n",
              output_filename, result[i].cache_name,
-             (long)result[i].cache_size / size_unit, size_unit_str,
+             (long)(result[i].cache_size / size_unit), size_unit_str,
              (long long)result[i].n_req,
              (double)result[i].n_miss / (double)result[i].n_req,
-             (double)result[i].n_miss_byte / (double)result[i].n_req_byte);
+             (double)result[i].n_miss_byte / (double)result[i].n_req_byte,
+             (double)result[i].n_req / 1000000.0 / result[i].runtime);
     printf("%s", output_str);
     fprintf(output_file, "%s", output_str);
   }

@@ -89,7 +89,8 @@ void simulate(reader_t *reader, cache_t *cache, int report_interval,
 
 #if defined(TRACK_EVICTION_V_AGE)
   while (cache->get_occupied_byte(cache) > 0) {
-    cache->evict(cache, req);
+    cache_obj_t* obj_evicted = cache->evict(cache, req);
+    my_free(sizeof(cache_obj_t), obj_evicted);
   }
 
 #endif

@@ -11,6 +11,7 @@
 
 #include "../config.h"
 #include "mem.h"
+#include "../../utils/include/mymutex.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -100,6 +101,10 @@ typedef struct {
 
 typedef struct {
   int64_t last_access_vtime;
+} RandomTwo_obj_metadata_t;
+
+typedef struct {
+  int64_t last_access_vtime;
   int32_t freq;
   int8_t fifo_id;
 } SFIFO_obj_metadata_t;
@@ -126,18 +131,13 @@ typedef struct {
   int32_t freq;
 } __attribute__((packed)) misc_metadata_t;
 
-typedef struct {
-  int32_t clock_id;
-  int32_t freq;
-  int32_t n_miss;
-  bool visited;
-  bool new_obj;
-} __attribute__((packed)) myclock_obj_params_t;
-
 // ############################## cache obj ###################################
 struct cache_obj;
+
+#define FLAG_IN_CACHE_BIT 0b001
+
 typedef struct cache_obj {
-  struct cache_obj *hash_next;
+  struct cache_obj *hash_next; // The first field to make an aligned pointer
   obj_id_t obj_id;
   uint32_t obj_size;
   struct {
@@ -147,6 +147,8 @@ typedef struct cache_obj {
 #ifdef SUPPORT_TTL
   uint32_t exp_time;
 #endif
+  uint8_t flags;
+
 /* age is defined as the time since the object entered the cache */
 #if defined(TRACK_EVICTION_V_AGE) || \
     defined(TRACK_DEMOTION) || defined(TRACK_CREATE_TIME)
@@ -165,6 +167,7 @@ typedef struct cache_obj {
     SR_LRU_obj_metadata_t SR_LRU;
     CR_LFU_obj_metadata_t CR_LFU;
     Hyperbolic_obj_metadata_t hyperbolic;
+    RandomTwo_obj_metadata_t RandomTwo;
     Belady_obj_metadata_t Belady;
     FIFO_Merge_obj_metadata_t FIFO_Merge;
     FIFO_Reinsertion_obj_metadata_t FIFO_Reinsertion;
@@ -173,7 +176,6 @@ typedef struct cache_obj {
     QDLP_obj_metadata_t QDLP;
     LIRS_obj_metadata_t LIRS;
     S3FIFO_obj_metadata_t S3FIFO;
-    myclock_obj_params_t myclock;
     Sieve_obj_params_t sieve;
 
 #if defined(ENABLE_GLCACHE) && ENABLE_GLCACHE == 1
@@ -182,7 +184,32 @@ typedef struct cache_obj {
   };
 } __attribute__((packed)) cache_obj_t;
 
+/**
+ * Set/get flags of the cache_obj atomically
+ */
+
+inline bool cache_obj_in_cache(cache_obj_t *obj) {
+  return obj->flags & FLAG_IN_CACHE_BIT; 
+}
+
+inline void cache_obj_set_in_cache(cache_obj_t *obj, bool in_cache) {
+  if (in_cache) {
+    fetch_or(&obj->flags, FLAG_IN_CACHE_BIT);
+  } else {
+    fetch_and(&obj->flags, ~FLAG_IN_CACHE_BIT);
+  }
+}
+
+
 struct request;
+
+/**
+ * verify the fingerprint of current cache_obj
+ * @param cache_obj
+ * @param bool [true if the fingerprint is correct]
+ */
+bool verify_cache_obj_fingerprint(const cache_obj_t *cache_obj);
+
 /**
  * copy the cache_obj to req_dest
  * @param req_dest
@@ -205,6 +232,13 @@ void copy_request_to_cache_obj(cache_obj_t *cache_obj,
  * @return
  */
 cache_obj_t *create_cache_obj_from_request(const struct request *req);
+
+/**
+ * create a empty cache_obj from obj_id
+ * @param obj_id
+ * @return
+ */
+cache_obj_t *create_cache_obj_from_obj_id(const obj_id_t obj_id);
 
 /**
  * the cache_obj has built-in a doubly list, in the case the list is used as
@@ -269,6 +303,12 @@ void prepend_obj_to_head(cache_obj_t **head, cache_obj_t **tail,
  */
 void append_obj_to_tail(cache_obj_t **head, cache_obj_t **tail,
                         cache_obj_t *cache_obj);
+/**
+ * free the the doubly linked list
+ * @param head
+ * @param tail
+ */
+void free_list(cache_obj_t **head, cache_obj_t **tail);
 /**
  * free cache_obj, this is only used when the cache_obj is explicitly
  * malloced
